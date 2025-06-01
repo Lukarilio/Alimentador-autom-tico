@@ -1,0 +1,213 @@
+#include <Wire.h> 
+#include <DS3231.h>
+#include <NewPing.h>
+
+#define DEBUG_MODE true
+
+DS3231 rtc;
+bool h12, PM;
+
+// Parâmetros de horário (globalmente acessíveis)
+int horaAlimentacao1 = 0; 
+int minutoAlimentacao1 = 0;
+int horaAlimentacao2 = 0;
+int minutoAlimentacao2 = 0;
+
+int demosComida1 = 0;  
+int demosComida2 = 0;
+
+// Pino do relé
+const int relePin = 8;
+
+// Sensor de distância
+const int triggerPin = 9;
+const int echoPin = 10;
+NewPing sonar(triggerPin, echoPin);
+float leitura, conversao1, porcentagem; // 'conversao2' can be removed if not used
+
+// Variáveis para controle não-bloqueante do relé
+unsigned long releStartTime = 0;
+const long releDuration = 7000; // 7 segundos
+bool releActive = false;
+
+void setup() {
+ Serial.begin(19200);// Para comunicação com o ESP8266
+ while (!Serial) {
+  ; // Aguarda a porta serial estar pronta
+ }
+ if (DEBUG_MODE) Serial.println("Arduino iniciado");
+
+ Wire.begin();// INICIALIZA A COMUNICAÇÃO I2C PARA O RTC
+// O rtc.begin() não é necessário para esta biblioteca DS3231.
+// Apenas a inicialização Wire.begin() é suficiente.
+
+ pinMode(relePin, OUTPUT);
+ digitalWrite(relePin, LOW);
+
+ pinMode(triggerPin, OUTPUT);
+ pinMode(echoPin, INPUT);
+
+ if (DEBUG_MODE) {
+  Serial.println("Configuracoes iniciais:");
+  Serial.print("H1: "); Serial.print(horaAlimentacao1); Serial.print(":"); Serial.println(minutoAlimentacao1);
+  Serial.print("H2: "); Serial.print(horaAlimentacao2); Serial.print(":"); Serial.println(minutoAlimentacao2);
+ }
+}
+
+void loop() {
+// Lógica de comunicação serial
+ if (Serial.available() > 0) {
+  String command = Serial.readStringUntil(';'); // Lê até o ';'
+  command.trim();
+
+  if (DEBUG_MODE) {
+   Serial.print("Comando recebido: ");
+   Serial.println(command);
+  }
+  if (command.startsWith("SET_HORARIO:")) {
+   if (DEBUG_MODE) Serial.println("RECEBIDO (SET_HORARIO)");
+   processSetHorarioCommand(command);
+  } else if (command.startsWith("GET_STATUS")) { 
+   if (DEBUG_MODE) Serial.println("RECEBIDO (GET_STATUS)");
+   enviarStatus();
+  } else {
+// Evita a mensagem "Comando desconhecido." se for apenas uma quebra de linha ou lixo.
+   if(/*!command.isEmpty() && */DEBUG_MODE) {
+    Serial.println("Comando desconhecido.");
+   }
+  }
+ }
+
+// Obtenção da hora atual do RTC
+ int horaAtual = rtc.getHour(h12, PM); 
+ int minutoAtual = rtc.getMinute();
+
+// Formato 24h
+ if (h12) {
+  if (PM && horaAtual != 12) {
+   horaAtual += 12;
+  } else if (!PM && horaAtual == 12) { // 12 AM (meia-noite) é 00h
+   horaAtual = 0;
+  }
+ }
+
+// Lógica de controle do motor baseada nos horários
+// Ação para o primeiro horário
+ if (horaAtual == horaAlimentacao1 && minutoAtual == minutoAlimentacao1 && demosComida1 == 0 && !releActive) {
+  if (DEBUG_MODE) Serial.println("Acionando relé para H1...");
+  digitalWrite(relePin, HIGH);
+  releStartTime = millis();
+  releActive = true;
+  demosComida1 = 1; // Marca como já alimentado para este horário
+ }
+
+// Ação para o segundo horário
+ if (horaAtual == horaAlimentacao2 && minutoAtual == minutoAlimentacao2 && demosComida2 == 0 && !releActive) {
+  if (DEBUG_MODE) Serial.println("Acionando relé para H2...");
+  digitalWrite(relePin, HIGH);
+  releStartTime = millis();
+  releActive = true;
+  demosComida2 = 1; // Marca como já alimentado para este horário
+ }
+
+// Desliga o relé após a duração definida (se estiver ativo)
+ if (releActive && (millis() - releStartTime >= releDuration)) {
+  digitalWrite(relePin, LOW);
+  releActive = false;
+  if (DEBUG_MODE) Serial.println("Relé desligado.");
+ }
+
+// Meia-noite reseta o status de comida do dia 
+ if (horaAtual == 0 && minutoAtual == 0 && (demosComida1 == 1 || demosComida2 == 1)) {
+  demosComida1 = 0;
+  demosComida2 = 0; 
+  if (DEBUG_MODE) Serial.println("Status de alimentação resetado para um novo dia.");
+ }
+
+// Leitura e cálculo do sensor de distância
+// A função mapFloat() é a correta aqui.
+ leitura = sonar.ping_cm();
+ if (leitura == 0) { // Se a leitura for 0 (fora do alcance), assume 0% de nível.
+   porcentagem = 0.00;
+ } else {
+   porcentagem = mapFloat(leitura, 0.0, 21.0, 100.0, 0.0); // Inverte a escala para porcentagem
+ }
+ porcentagem = constrain(porcentagem, 0.0, 100.0); // Garante que a porcentagem esteja entre 0 e 100
+
+// Pequeno delay para evitar loop muito rápido, mas não bloqueante
+ delay(100); // Reduzido de 1000ms para 100ms para um loop mais responsivo
+}
+
+// Função auxiliar para map com floats (permanece a mesma, é útil!)
+float mapFloat(float x, float in_min, float in_max, float out_min, float out_max) {
+ return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}
+
+void processSetHorarioCommand(String command) {
+// Formato esperado: SET_HORARIO:hora1:minuto1:hora2:minuto2;
+// Exemplo de comando: SET_HORARIO:10:30:22:15;
+
+// Pular "SET_HORARIO:"
+ int currentPos = command.indexOf(':'); 
+ if (currentPos == -1) { if (DEBUG_MODE) Serial.println("Erro de formato inicial (SET_HORARIO)."); return; }
+ 
+ int nextPos;
+
+// Hora 1
+ nextPos = command.indexOf(':', currentPos + 1);
+ if (nextPos == -1) { if (DEBUG_MODE) Serial.println("Erro de formato H1."); return; }
+ horaAlimentacao1 = command.substring(currentPos + 1, nextPos).toInt();
+ currentPos = nextPos;
+
+// Minuto 1
+ nextPos = command.indexOf(':', currentPos + 1);
+ if (nextPos == -1) { if (DEBUG_MODE) Serial.println("Erro de formato M1."); return; }
+ minutoAlimentacao1 = command.substring(currentPos + 1, nextPos).toInt();
+ currentPos = nextPos;
+
+// Hora 2
+ nextPos = command.indexOf(':', currentPos + 1);
+ if (nextPos == -1) { if (DEBUG_MODE) Serial.println("Erro de formato H2."); return; }
+ horaAlimentacao2 = command.substring(currentPos + 1, nextPos).toInt();
+ currentPos = nextPos;
+
+// Minuto 2 (termina com ';')
+ nextPos = command.indexOf(';', currentPos + 1); 
+ if (nextPos == -1) { if (DEBUG_MODE) Serial.println("Erro de formato M2 ou terminador."); return; }
+ minutoAlimentacao2 = command.substring(currentPos + 1, nextPos).toInt();
+
+ if (DEBUG_MODE) {
+  Serial.print("Horário 1 definido para: ");
+  Serial.print(horaAlimentacao1);
+  Serial.print(":");
+  Serial.println(minutoAlimentacao1);
+  Serial.print("Horário 2 definido para: ");
+  Serial.print(horaAlimentacao2);
+  Serial.print(":");
+  Serial.println(minutoAlimentacao2);
+ }
+}
+
+void enviarStatus() {
+// Leitura do sensor de distância (já feito no loop, mas refeito aqui para garantir dados atualizados)
+ leitura = sonar.ping_cm();
+ if (leitura == 0) {
+   porcentagem = 0.00;
+ } else {
+   porcentagem = mapFloat(leitura, 0.0, 21.0, 100.0, 0.0);
+ }
+ porcentagem = constrain(porcentagem, 0.0, 100.0);
+
+// Formata a resposta para o ESP8266 com todos os dados solicitados
+// Formato: STATUS:Nivel:XX%;Horario1:HH:MM;Horario2:HH:MM;
+// Adicionando o '\n' (newline) no final da string para garantir que o ESP8266 detecte o fim da linha.
+ String status_resposta = "STATUS:Nivel:" + String(int(porcentagem)) + "%;" + 
+             "Horario1:" + String(horaAlimentacao1) + ":" + String(minutoAlimentacao1) + ";" + 
+             "Horario2:" + String(horaAlimentacao2) + ":" + String(minutoAlimentacao2) + ";\n";
+
+ Serial.println(status_resposta); // Usa println para adicionar CR/LF
+// if (DEBUG_MODE) { // Descomente para ver no Serial Monitor do Arduino
+//   Serial.print("Status completo enviado: ");
+//   Serial.println(status_resposta);
+// }
+}
