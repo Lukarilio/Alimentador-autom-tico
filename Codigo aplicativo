@@ -1,0 +1,336 @@
+import React, { useState, useEffect } from 'react';
+import { View, Text, TextInput, Button, StyleSheet, Alert } from 'react-native';
+
+const App = () => {
+  const [hora1, setHora1] = useState('08');
+  const [minuto1, setMinuto1] = useState('00');
+  const [hora2, setHora2] = useState('18');
+  const [minuto2, setMinuto2] = useState('00');
+  const [status, setStatus] = useState('');
+  const [ip, setIp] = useState('***.***.***.***'); // Defina o IP padrão do ESP8266
+  const [isConnected, setIsConnected] = useState(false);
+
+  // Testa a conexão ao carregar o app
+  useEffect(() => {
+    testarConexao();
+  }, []);
+
+  const testarConexao = async () => {
+    try {
+      const response = await fetch(`http://${ip}/status`, /*{ timeout: 3000 }*/);
+      const data = await response.json();
+      setIsConnected(true);
+      setStatus(`Conectado: ${JSON.stringify(data)}`);
+    } catch (error) {
+      setIsConnected(false);
+      setStatus(`Erro de conexão: ${error}`);
+    }
+  };
+
+  const enviarHorarios = async () => {
+    if (!hora1 || !minuto1 || !hora2 || !minuto2) {
+      Alert.alert('Erro', 'Preencha todos os horários');
+      return;
+    }
+
+    try {
+      const url = `http://${ip}/setHorario?hora1=${hora1}&minuto1=${minuto1}&hora2=${hora2}&minuto2=${minuto2}`;
+      const response = await fetch(url);
+      const data = await response.text();
+      setStatus(`Horários enviados: ${data}`);
+      buscarStatus(); // Atualiza o status após enviar
+    } catch (error) {
+      setStatus(`Erro: ${error}`);
+    }
+  };
+
+  const buscarStatus = async () => {
+    try {
+      const response = await fetch(`http://${ip}/status`);
+      const data = await response.json();
+      setStatus(`Nível: ${data.status || 'Não disponível'}`);
+    } catch (error) {
+      setStatus(`Erro ao buscar status: ${error}`);
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>Comedouro Automático</Text>
+      
+      <TextInput
+        style={styles.timeInput}
+        placeholder="IP do ESP8266"
+        value={ip}
+        onChangeText={setIp}
+      />
+      
+      <Button 
+        title="Testar Conexão" 
+        onPress={testarConexao} 
+      />
+      
+      <Text style={styles.sectionTitle}>Horário 1:</Text>
+      <View style={styles.timeInputContainer}>
+        <TextInput
+          style={styles.timeInput}
+          placeholder="Hora (0-23)"
+          value={hora1}
+          onChangeText={setHora1}
+          keyboardType="numeric"
+          maxLength={2}
+        />
+        <Text>:</Text>
+        <TextInput
+          style={styles.timeInput}
+          placeholder="Min (0-59)"
+          value={minuto1}
+          onChangeText={setMinuto1}
+          keyboardType="numeric"
+          maxLength={2}
+        />
+      </View>
+
+      <Text style={styles.sectionTitle}>Horário 2:</Text>
+      <View style={styles.timeInputContainer}>
+        <TextInput
+          style={styles.timeInput}
+          placeholder="Hora (0-23)"
+          value={hora2}
+          onChangeText={setHora2}
+          keyboardType="numeric"
+          maxLength={2}
+        />
+        <Text>:</Text>
+        <TextInput
+          style={styles.timeInput}
+          placeholder="Min (0-59)"
+          value={minuto2}
+          onChangeText={setMinuto2}
+          keyboardType="numeric"
+          maxLength={2}
+        />
+      </View>
+
+      <Button 
+        title="Enviar Horários" 
+        onPress={enviarHorarios} 
+        disabled={!isConnected}
+      />
+      
+      <Button 
+        title="Atualizar Status" 
+        onPress={buscarStatus} 
+        disabled={!isConnected}
+      />
+      
+      <Text style={styles.statusText}>
+        Status: {status}
+      </Text>
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    padding: 20,
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  sectionTitle: {
+    fontSize: 16,
+    marginTop: 10,
+  },
+  timeInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 5,
+  },
+  timeInput: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    padding: 8,
+    marginHorizontal: 5,
+    width: 60,
+  },
+  statusText: {
+    marginTop: 20,
+    padding: 10,
+    backgroundColor: '#f0f0f0',
+  },
+});
+
+export default App;
+import React, { useState, useEffect } from 'react';
+import { View, Text, TextInput, Button, StyleSheet, Alert } from 'react-native';
+
+const App = () => {
+  const [hora1, setHora1] = useState('08');
+  const [minuto1, setMinuto1] = useState('00');
+  const [hora2, setHora2] = useState('18');
+  const [minuto2, setMinuto2] = useState('00');
+  const [status, setStatus] = useState('');
+  const [ip, setIp] = useState('192.168.1.105'); // Defina o IP padrão do ESP8266
+  const [isConnected, setIsConnected] = useState(false);
+
+  // Testa a conexão ao carregar o app
+  useEffect(() => {
+    testarConexao();
+  }, []);
+
+  const testarConexao = async () => {
+    try {
+      const response = await fetch(`http://${ip}/status`, /*{ timeout: 3000 }*/);
+      const data = await response.json();
+      setIsConnected(true);
+      setStatus(`Conectado: ${JSON.stringify(data)}`);
+    } catch (error) {
+      setIsConnected(false);
+      setStatus(`Erro de conexão: ${error}`);
+    }
+  };
+
+  const enviarHorarios = async () => {
+    if (!hora1 || !minuto1 || !hora2 || !minuto2) {
+      Alert.alert('Erro', 'Preencha todos os horários');
+      return;
+    }
+
+    try {
+      const url = `http://${ip}/setHorario?hora1=${hora1}&minuto1=${minuto1}&hora2=${hora2}&minuto2=${minuto2}`;
+      const response = await fetch(url);
+      const data = await response.text();
+      setStatus(`Horários enviados: ${data}`);
+      buscarStatus(); // Atualiza o status após enviar
+    } catch (error) {
+      setStatus(`Erro: ${error}`);
+    }
+  };
+
+  const buscarStatus = async () => {
+    try {
+      const response = await fetch(`http://${ip}/status`);
+      const data = await response.json();
+      setStatus(`Nível: ${data.status || 'Não disponível'}`);
+    } catch (error) {
+      setStatus(`Erro ao buscar status: ${error}`);
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>Comedouro Automático</Text>
+      
+      <TextInput
+        style={styles.timeInput}
+        placeholder="IP do ESP8266"
+        value={ip}
+        onChangeText={setIp}
+      />
+      
+      <Button 
+        title="Testar Conexão" 
+        onPress={testarConexao} 
+      />
+      
+      <Text style={styles.sectionTitle}>Horário 1:</Text>
+      <View style={styles.timeInputContainer}>
+        <TextInput
+          style={styles.timeInput}
+          placeholder="Hora (0-23)"
+          value={hora1}
+          onChangeText={setHora1}
+          keyboardType="numeric"
+          maxLength={2}
+        />
+        <Text>:</Text>
+        <TextInput
+          style={styles.timeInput}
+          placeholder="Min (0-59)"
+          value={minuto1}
+          onChangeText={setMinuto1}
+          keyboardType="numeric"
+          maxLength={2}
+        />
+      </View>
+
+      <Text style={styles.sectionTitle}>Horário 2:</Text>
+      <View style={styles.timeInputContainer}>
+        <TextInput
+          style={styles.timeInput}
+          placeholder="Hora (0-23)"
+          value={hora2}
+          onChangeText={setHora2}
+          keyboardType="numeric"
+          maxLength={2}
+        />
+        <Text>:</Text>
+        <TextInput
+          style={styles.timeInput}
+          placeholder="Min (0-59)"
+          value={minuto2}
+          onChangeText={setMinuto2}
+          keyboardType="numeric"
+          maxLength={2}
+        />
+      </View>
+
+      <Button 
+        title="Enviar Horários" 
+        onPress={enviarHorarios} 
+        disabled={!isConnected}
+      />
+      
+      <Button 
+        title="Atualizar Status" 
+        onPress={buscarStatus} 
+        disabled={!isConnected}
+      />
+      
+      <Text style={styles.statusText}>
+        Status: {status}
+      </Text>
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    padding: 20,
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  sectionTitle: {
+    fontSize: 16,
+    marginTop: 10,
+  },
+  timeInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 5,
+  },
+  timeInput: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    padding: 8,
+    marginHorizontal: 5,
+    width: 60,
+  },
+  statusText: {
+    marginTop: 20,
+    padding: 10,
+    backgroundColor: '#f0f0f0',
+  },
+});
+
+export default App;
