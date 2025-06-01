@@ -1,0 +1,167 @@
+#include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
+#include <SoftwareSerial.h>
+#include <ArduinoJson.h> 
+
+// Credenciais WiFi
+const char* ssid = "****";
+const char* password = "*************";
+
+// Porta do servidor web
+ESP8266WebServer server(80);
+
+SoftwareSerial arduinoSerial(0, 3);
+
+void setup() {
+ Serial.begin(19200); // Serial para debug do ESP8266 (USB)
+ delay(100); // Pequeno delay para estabilização
+ arduinoSerial.begin(19200); // Serial para comunicação com Arduino
+
+ Serial.println("\nConectando-se ao Wi-Fi...");
+ WiFi.begin(ssid, password);
+ unsigned long connectStartTime = millis();
+ while (WiFi.status() != WL_CONNECTED && millis() - connectStartTime < 30000) { // Timeout de 30s
+  delay(500);
+  Serial.print(".");
+ }
+
+ if (WiFi.status() == WL_CONNECTED) {
+  Serial.println("\nWi-Fi conectado!");
+  Serial.print("Endereço IP: ");
+  Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("\nFalha na conexão Wi-Fi. Verifique as credenciais.");
+  }
+
+// Rotas do servidor web
+ server.on("/setHorario", HTTP_GET, handleSetHorario);
+ server.on("/status", HTTP_GET, handleGetStatus);
+ server.onNotFound(handleNotFound);
+
+ server.begin();
+ Serial.println("Servidor web iniciado na porta 80");
+}
+
+void loop() {
+ server.handleClient();
+}
+
+void handleSetHorario() {
+ server.sendHeader("Access-Control-Allow-Origin", "*");
+ if (server.hasArg("hora1") && server.hasArg("minuto1") &&
+   server.hasArg("hora2") && server.hasArg("minuto2")) {
+  String hora1 = server.arg("hora1");
+  String minuto1 = server.arg("minuto1");
+  String hora2 = server.arg("hora2");
+  String minuto2 = server.arg("minuto2");
+
+  String dataToSend = "SET_HORARIO:" + hora1 + ":" + minuto1 + ":" + hora2 + ":" + minuto2 + ";"; //Formato: SET_HORARIO:hora1:minuto1:hora2:minuto2;
+
+  arduinoSerial.println(dataToSend); // Envia o comando para o Arduino
+
+  server.send(200, "text/plain", "Horários enviados ao Arduino");
+  Serial.print("Dados enviados ao Arduino: ");
+  Serial.println(dataToSend);
+ } else {
+  server.send(400, "text/plain", "Parâmetros de horário ausentes. Use /setHorario?hora1=H1&minuto1=M1&hora2=H2&minuto2=M2");
+ }
+}
+
+void handleGetStatus() {
+// Limpa o buffer serial ANTES de enviar o comando e esperar a resposta
+ while(arduinoSerial.available()) {
+  arduinoSerial.read();
+ }
+ 
+// Solicita o status ao Arduino
+ arduinoSerial.println("GET_STATUS;"); // Adiciona o ';' no final do comando
+
+// Aumenta o timeout e lê byte a byte até encontrar o terminador ou atingir o timeout
+ unsigned long startTime = millis();
+ String statusFromArduino = "";
+ bool receivedFullMessage = false;
+
+ const unsigned long timeout = 3000; // 3 segundos de timeout para a resposta
+
+ while(millis() - startTime < timeout) {
+  if(arduinoSerial.available()) {
+   char c = arduinoSerial.read();
+   statusFromArduino += c;
+// O Arduino envia String.println(), que adiciona \r\n. 
+// Portanto, o terminador será '\n' (newline), não ';'.
+   if (c == '\n') { // Espera pelo newline como terminador
+    receivedFullMessage = true;
+    break; 
+   }
+  }
+  yield(); // Permite que o ESP8266 faça outras tarefas enquanto espera
+ }
+ 
+ server.sendHeader("Access-Control-Allow-Origin", "*"); // Always send CORS header
+
+ if(receivedFullMessage) {
+  statusFromArduino.trim(); // Remove espaços em branco, incluindo o \r e \n
+  Serial.print("Mensagem bruta do Arduino: ");
+  Serial.println(statusFromArduino);
+
+// Agora, parse a string recebida para extrair os valores
+// Formato esperado do Arduino: STATUS:Nivel:XX%;Horario1:HH:MM;Horario2:HH:MM;
+  int nivel = -1; 
+  String horario1_str = "N/A";
+  String horario2_str = "N/A";
+
+// Extrair Nivel
+  int nivel_start = statusFromArduino.indexOf("Nivel:");
+  if (nivel_start != -1) {
+   nivel_start += 6; 
+   int nivel_end = statusFromArduino.indexOf("%;", nivel_start);
+   if (nivel_end != -1) {
+    nivel = statusFromArduino.substring(nivel_start, nivel_end).toInt();
+   }
+  }
+
+// Extrair Horario1
+  int h1_start = statusFromArduino.indexOf("Horario1:");
+  if (h1_start != -1) {
+   h1_start += 9; 
+   int h1_end = statusFromArduino.indexOf(";", h1_start);
+   if (h1_end != -1) {
+    horario1_str = statusFromArduino.substring(h1_start, h1_end);
+   }
+  }
+
+// Extrair Horario2
+  int h2_start = statusFromArduino.indexOf("Horario2:");
+  if (h2_start != -1) {
+   h2_start += 9; 
+   int h2_end = statusFromArduino.indexOf(";", h2_start);
+   if (h2_end != -1) {
+    horario2_str = statusFromArduino.substring(h2_start, h2_end);
+   }
+  }
+
+// Cria um objeto JSON para a resposta
+  StaticJsonDocument<256> doc; // Aumentado um pouco para segurança
+  doc["Nivel"] = nivel;
+  doc["Horario1"] = horario1_str;
+  doc["Horario2"] = horario2_str;
+
+  String jsonResponse;
+  serializeJson(doc, jsonResponse);
+
+  server.send(200, "application/json", jsonResponse);
+  
+  Serial.print("Status JSON enviado: ");
+  Serial.println(jsonResponse);
+ } else {
+// Se não recebeu a mensagem completa dentro do timeout
+  server.send(408, "application/json", "{\"error\":\"Timeout ou dados incompletos do Arduino\", \"partial_data\":\"" + statusFromArduino + "\"}");
+  Serial.println("Timeout ou dados incompletos do Arduino.");
+  Serial.print("Dados parciais: ");
+  Serial.println(statusFromArduino);
+ }
+}
+
+void handleNotFound() {
+ server.send(404, "text/plain", "Não encontrado. Use /setHorario ou /status");
+}
